@@ -1,0 +1,275 @@
+---
+title: "GE_TimeSeries_Analysis"
+author: "PraveenJoshi"
+date: "August 9, 2017"
+output: html_document
+---
+
+### Problem Description
+ 
+ Build time series models in using GE stock data and the goal is to predict the price of a stock for future time period like 1 weeks ahead using time series algorithms and evaluating each of the
+algorithms.
+
+
+###Clear the Global Environment
+```{r}
+rm(list=ls(all=TRUE))
+```
+### Library Call
+```{r}
+library(forecast)
+library(lubridate)
+library(DataCombine)
+library(imputeTS)
+library(dplyr)
+library(TTR)
+library(graphics)
+library(data.table)
+library(plyr)
+library(zoo)
+```
+### Read Data from CSV
+```{r}
+setwd("C:\\Users\\prave\\Desktop\\time-series-assignment-praveenjoshi01-master")
+data = read.csv("BSE-BOM532309.csv")
+```
+### Observe the data
+* Find how many unique attributes are there
+* What are all the columns given in the data
+```{r}
+names(data)
+##Summary
+summary(data$Condition)
+## Dimensions
+dim(data)
+```
+## Basic data View
+```{r}
+head(data,30)
+```
+## Summary of the entire data set
+```{r}
+summary(data)
+str(data)
+```
+### Observation & Analysis 
+* We observe that there is different opening price for the GE stock at different day.
+* R has read the data column either as factor we need convert it to date format
+```{r}
+data$Date=as.Date(data$Date,format="%Y-%m-%d")
+```
+### Missing values in time series
+* Observe the data to find if any
+```{r}
+sum(is.na(data))
+colSums(is.na(data))
+str(data$Date)
+```
+
+### Creating a data frame for sequence of Days 
+```{r }
+seq <- data.frame("observedDays"=seq(1,4159))
+```
+#### Merge the data frames of seq of dates with the dates of stocks obtained from BSE
+```{r }
+RtData2=cbind(seq,data)
+head(RtData2)
+```
+
+### Extracting out relative dataSet for further Analysis.
+```{r}
+#zoo package
+RtData2<- RtData2[,c(1,3)]
+head(RtData2)
+```
+
+
+### Splitting of the Data
+* Random split is not possible because here we will be in need of sequence where by we miss the data points
+* splitting is done by sequential splitting
+```{r}
+Train=RtData2[10:4159,]
+Test=RtData2[1:9,]
+```
+
+### converting into time series 
+* our target variable is opening price
+```{r}
+StockSeries <- ts(Train$Open,frequency =5)
+```
+
+### Vizualize the time series Data
+```{r}
+plot(StockSeries,
+     type="l",
+     lwd=3,
+     col="red",
+     xlab="yearly",
+     ylab="Price",
+     main="Time series plot for Book-xyzabc")
+```
+### Decomposed Time Series
+* Decompose will provide us with the info on seasonality,trend and randomness
+```{r}
+StockSeriesdecomposed=decompose(StockSeries)
+plot(StockSeriesdecomposed,col="Red")
+```
+### ACF,PACF 
+* Autocorrelation is the linear dependence of a variable with itself at two points in time
+* For stationary processes, autocorrelation between any two observations only depends on the time lag h between them
+*  Partial autocorrelation is the autocorrelation between yt and ytâh after removing any linear dependence on y1,y2, ..., ytâh+1
+```{r}
+par(mfrow=c(2,2))
+acf(StockSeries,lag=30)
+pacf(StockSeries,lag=30)
+```
+
+
+```{r }
+StockSeries1 <- ts(Train$Open, frequency =1)
+plot(StockSeries1,xlab = "Weekly",ylab="Price")
+acf(StockSeries1,lag=30)
+pacf(StockSeries1,lag=30)
+```
+
+### Stationarize by differencing
+
+```{r}
+par(mfrow=c(2,3))
+plot(diff(StockSeries1,lag = 1),type="l"); acf(diff(StockSeries1,lag = 1),lag=30) ;pacf(diff(StockSeries1,lag = 1),lag=30)
+plot(diff(StockSeries1,lag=2),type="l");  acf(diff(StockSeries1,lag = 2),lag=30); pacf(diff(StockSeries1,lag = 2),lag=30)
+```
+* one lag has stationarize the data we can use ndiffs of forecast package to check no of differences required to      stationarize the data
+```{r}
+ndiffs(StockSeries1)
+```
+
+
+### Modelling  the time series using simple moving averages
+* Time series Price has trend 
+* Modelling the time series behaviour by simple moving averages
+```{r}
+fitsma <- SMA(StockSeries,n=2)
+pred<-forecast(fitsma,h=4)
+plot(pred)
+lines(fitsma,col="red")
+```
+### Define the metric MAPE 
+```{r}
+smaMape <- mean(abs((StockSeries[2:length(StockSeries)]-fitsma[2:length(StockSeries)])/StockSeries[2:length(StockSeries)]))
+smaMape
+```
+
+### Weighted Moving Averages
+```{r}
+fitwma<- WMA(StockSeries,n=2,1:2)
+wmaMape <- mean(abs((StockSeries[2:length(StockSeries)]-fitwma[2:length(StockSeries)])/StockSeries[2:length(StockSeries)]))
+wmaMape
+pred<-forecast(fitwma,h=4)
+plot(pred)
+lines(fitwma,col="yellow")
+```
+
+### Exponential Moving Averages
+```{r}
+fitEma <- EMA(StockSeries, n = 2)
+emaMape <- mean(abs((StockSeries[2:length(StockSeries)]-fitEma[2:length(StockSeries)])/StockSeries[2:length(StockSeries)]))
+emaMape
+pred<-forecast(fitEma,h=4)
+plot(pred)
+lines(fitEma,col="purple")
+```
+
+## Build a HoltWinters model  with trend 
+```{r}
+holtpriceforecast <- HoltWinters(Train$Open,gamma=FALSE)
+head(holtpriceforecast$fitted)
+```
+## HoltWinters model  with trend  and Seasonality
+
+```{r}
+priceholtforecast <-
+HoltWinters(StockSeries, beta=TRUE, gamma=TRUE, seasonal="additive")
+head(priceholtforecast$fitted)
+```
+
+
+### Prediction on the Train
+```{r}
+holtforecastTrain <- data.frame(priceholtforecast$fitted)
+holtforecastTrainpredictions <- holtforecastTrain$xhat
+head(holtforecastTrainpredictions)
+```
+
+### Prediction on test data
+```{r}
+priceforecast<-forecast(priceholtforecast,h = 8)
+plot(priceforecast)
+
+```
+
+
+### Arima Models
+```{r}
+
+model1 <- arima(StockSeries,c(0,0,0))
+model1
+acf(StockSeries) 
+pacf(StockSeries)
+plot(StockSeries)
+#non seasonal differentiating
+ndiffs(StockSeries)
+#seasonal differentiating
+nsdiffs(StockSeries)
+```
+## Considering the difference from the graph as d=1 to stationarize
+```{r}
+model2 <- arima(StockSeries,c(0,1,0))
+model2
+acf(diff(StockSeries,lag = 1))
+pacf(diff(StockSeries,lag = 1))
+plot(diff(StockSeries))
+```
+* plot has still non stationary behaviour another difference can stationarize it 
+```{r}
+model3 <- arima(StockSeries,c(0,2,0))
+model3
+plot(diff(StockSeries,differences = 2))
+acf(diff(StockSeries,differences = 2))
+pacf(diff(StockSeries,differences = 2))
+```
+* Observing the acf and pacf there is significant lag in acf and also in pacf that has to be taken care 
+```{r}
+model4 <- arima(StockSeries,c(1,1,1))
+model4
+
+
+```
+## Plots of the models
+
+```{r}
+par(mfrow=c(2,2))
+plot(model1$residuals,ylim=c(-50,50))
+plot(model2$residuals,ylim=c(-50,50))
+plot(model3$residuals,ylim=c(-50,50))
+plot(model4$residuals,ylim=c(-50,50))
+```
+###  Auto Arima
+```{r}
+MODEL_ARIMA <- auto.arima(StockSeries, ic='aic')
+summary(MODEL_ARIMA)
+```
+
+### Forecast on the models 
+```{r}
+pricearimaforecasts1 <- forecast(model1, h=4)
+plot(pricearimaforecasts1)
+pricearimaforecast3 <- forecast(model3, h=4)
+plot(pricearimaforecast3)
+pricearimaforecasts_autArima<- forecast(MODEL_ARIMA,h=4)
+plot(pricearimaforecasts_autArima,flwd = 2)
+summary(MODEL_ARIMA)
+
+```
+
+*Comparing the AIC Auto Arima was giving good results for the product item considered
