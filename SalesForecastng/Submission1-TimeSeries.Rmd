@@ -1,0 +1,498 @@
+---
+title: "Sales Forecasting of Retail Clothing Product Categories"
+author: "PraveenJoshi"
+date: "November 22, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem Description
+Forecasting is an important approach to plan the future effectively and
+efficiently. A time series is a sequence of data points, typically consisting of
+successive measurements made over a uniform time interval. Time series
+forecasting is the use of a model to predict future values based on previously
+observed values.
+
+A leading retailer in USA, wants to forecast sales for their product categories in
+their store based on the sales history of each category. Sales forecast has very high
+influence on the performance of the company's business and hence these sales
+forecasts can be used to estimate company's success or performance in the
+coming year. Accurate forecasts may lead to better decisions in business.
+
+Sales or revenues forecasting is very important for retail operations . Forecasting of
+retail sales helps retailer to take necessary measures to plan their budgets or
+investments in a period (monthly, yearly) among different product categories
+like women clothing, men clothing and other clothing and at the same time they
+can plan to minimize revenue loss from unavailability of products by investing
+accordingly. 
+
+#Libraries To Import
+
+```{r, include=FALSE}
+library(forecast)
+library(imputeTS)
+library(plotly)
+library(zoo)
+library(forecastxgb)
+```
+
+#Loading Data into environment
+
+```{r}
+trainingData <-  read.csv('train.csv', header = T)
+```
+
+##Visualization of missing Data
+Missing Data visualization will give us overall picture, whether data is sufficient or not to proceed for further analysis.
+```{r , echo=FALSE}
+tsTrainingData<- ts(trainingData$Sales.In.ThousandDollars.,frequency = 12,start = c(2009,1))
+plotNA.distribution(tsTrainingData, colPoints = "steelblue",
+colBackgroundMV = "indianred2", main = "Distribution of NAs",
+xlab = "Time", ylab = "Value", pch = 20, cexPoints = 0.8,
+col = "black")
+
+```
+
+##Splitting Data for 3 categories
+Splitting data into 3 product categories, so that each time series can be analyzed.
+```{r }
+dfMale <- trainingData[which(trainingData$ProductCategory == "MenClothing"),]
+dfMale_REM <- subset(dfMale, select = -c(ProductCategory))
+dfFemale <- trainingData[which(trainingData$ProductCategory == "WomenClothing"),]
+dfFemale_REM <- subset(dfFemale, select = -c(ProductCategory))
+dfOther <- trainingData[which(trainingData$ProductCategory == "OtherClothing"),]
+dfOthers_REM <- subset(dfOther, select = -c(ProductCategory))
+timeStamp<-as.yearmon(paste(dfOthers_REM$Year, dfOthers_REM$Month), "%Y %m")
+```
+
+##Converting product categories sales data into TimeSeries
+
+```{r }
+TS_dfMale_REM<- ts(dfMale_REM$Sales.In.ThousandDollars.,frequency = 12,start = c(2009,1))
+TS_dfFemale_REM<- ts(dfFemale_REM$Sales.In.ThousandDollars.,frequency = 12,start = c(2009,1))
+TS_dfOthers_REM<- ts(dfOthers_REM$Sales.In.ThousandDollars.,frequency = 12,start = c(2009,1))
+```
+
+##Visualization of missing Data for each Product Categories
+
+###Men Clothing ~ 4 missing values
+```{r , echo=FALSE}
+plotNA.distribution(TS_dfMale_REM, colPoints = "steelblue",
+colBackgroundMV = "indianred2", main = "Distribution of NAs",
+xlab = "Time", ylab = "Value", pch = 20, cexPoints = 0.8,
+col = "black")
+```
+
+###Women Clothing ~ 4 missing values
+```{r , echo=FALSE }
+plotNA.distribution(TS_dfFemale_REM, colPoints = "steelblue",
+colBackgroundMV = "indianred2", main = "Distribution of NAs",
+xlab = "Time", ylab = "Value", pch = 20, cexPoints = 0.8,
+col = "black")
+```
+
+###Other Clothing ~ 5 missing values
+```{r , echo=FALSE }
+plotNA.distribution(TS_dfOthers_REM, colPoints = "steelblue",
+colBackgroundMV = "indianred2", main = "Distribution of NAs",
+xlab = "Time", ylab = "Value", pch = 20, cexPoints = 0.8,
+col = "black")
+```
+
+##Imputing TimeSeries Missing Values
+####Time Series values can be filled in number of ways.
+<b>Some of known ways to fill time series:</b>
+</br>
+1)Last Observation Carried Forward- LOCF </br>
+2)Next Observation Carried Backward - NOCB </br>
+3)Kalman Smoothing </br>
+4)Interpolation </br>
+
+Method opted to fill our sales time series is locf (Last Observed Come First).
+LOCF Description:
+Replaces each missing value with the most recent present value prior to it
+
+```{r , echo=FALSE }
+dfMale_REM$Sales.In.ThousandDollars. <- na.locf(TS_dfMale_REM)
+dfFemale_REM$Sales.In.ThousandDollars. <-  na.locf(TS_dfFemale_REM)
+dfOthers_REM$Sales.In.ThousandDollars. <-  na.locf(TS_dfOthers_REM)
+```
+
+#SneekPeak of product sales for Males Category 
+```{r , echo=FALSE }
+plot_ly(x = timeStamp, y= dfMale_REM$Sales.In.ThousandDollars.,mode = 'lines')
+```
+
+#SneekPeak of product sales for Females Category 
+```{r , echo=FALSE }
+plot_ly(x = timeStamp, y= dfFemale_REM$Sales.In.ThousandDollars.,mode = 'lines')
+```
+
+#SneekPeak of product sales for Others Category 
+```{r , echo=FALSE }
+plot_ly(x = timeStamp, y= dfOthers_REM$Sales.In.ThousandDollars.,mode = 'lines')
+```
+
+#Making Time Series Model for Male Category
+Decomposing Product Category MenClothing for visualizing random, seasonal and trend components of TimeSeries
+```{r , echo=FALSE }
+dfMale_timeseriescomponents <-  decompose(dfMale_REM$Sales.In.ThousandDollars.)
+plot(dfMale_timeseriescomponents)
+```
+
+#ACF and PACF plots
+```{r , echo=FALSE }
+par(mfrow=c(1,3))
+plot(dfMale_REM$Sales.In.ThousandDollars.)
+acf(dfMale_REM$Sales.In.ThousandDollars.)
+pacf(dfMale_REM$Sales.In.ThousandDollars., lag.max=20)
+par(mfrow=c(1,1))
+```
+
+#Split into train and test
+```{r}
+Sales_train = subset(dfMale_REM, Year !="2015")
+Sales_val = subset(dfMale_REM, Year =="2015")
+
+Sales_traints = ts(Sales_train$Sales.In.ThousandDollars., frequency = 12,start=c(2009,1))
+Sales_testts = ts(Sales_val$Sales.In.ThousandDollars., frequency = 12, start = c(2015,1))
+```
+
+#Model Building
+
+##1) Holt Winters model
+```{r}
+Sales_HW <-  HoltWinters(Sales_traints)
+
+#Train Model MAPE
+MAPE_train_HW <- mean(abs(Sales_traints-Sales_HW$fitted[,"xhat"])/abs(Sales_traints))*100
+
+#Validation Forecast Mape
+Sales_forecast_HW <- forecast:::forecast.HoltWinters(Sales_HW, h=12)
+MAPE_test_HW <- mean(abs(Sales_testts - Sales_forecast_HW$mean)/abs(Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(Sales_forecast_HW)
+```
+
+##2) Auto.Arima model
+```{r}
+Sales_autoArima <- auto.arima(Sales_traints, ic='aic')
+
+#Train Model MAPE
+MAPE_train_AA <- mean(abs(Sales_traints-Sales_autoArima$x)/abs(Sales_traints))*100
+
+#Validation Forecast Mape
+Sales_forecast_AA <- forecast:::forecast.Arima(Sales_autoArima,h=12)
+MAPE_test_AA <- mean(abs(Sales_testts-Sales_forecast_AA$mean)/abs(Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(Sales_forecast_AA)
+```
+
+##3) ETS model
+```{r}
+Sales_ETS <- ets(model = "ZMZ",Sales_traints)
+
+#Train Model MAPE
+MAPE_train_ETS <- mean(abs(Sales_traints-Sales_ETS$fitted)/abs(Sales_traints))*100
+
+#Validation Forecast Mape
+Sales_forecast_ETS <- forecast:::forecast.ets(Sales_ETS,h=12)
+MAPE_test_ETS <- mean(abs(Sales_testts-Sales_forecast_ETS$mean)/abs(Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(Sales_forecast_ETS)
+```
+
+##4) thetaf model
+```{r}
+Sales_taf <- thetaf(Sales_traints)
+
+#Train Model MAPE
+MAPE_train_taf <- mean(abs(Sales_traints-Sales_taf$fitted)/abs(Sales_traints))*100
+
+#Validation Forecast Mape
+Sales_forecast_taf <- forecast:::forecast.Arima(Sales_autoArima,h=12)
+MAPE_test_taf <- mean(abs(Sales_testts-Sales_forecast_taf$mean)/abs(Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(Sales_forecast_taf)
+```
+
+##5) xGBoost model
+```{r}
+Sales_xg <- forecastxgb:::xgbts(Sales_traints)
+
+#Train Model MAPE
+MAPE_train_xG <- mean(abs(Sales_traints-Sales_xg$y)/abs(Sales_traints))*100
+
+#Validation Forecast Mape
+Sales_forecast_xG <- forecast:::forecast(Sales_xg,h=12)
+MAPE_test_xG <- mean(abs(Sales_testts-Sales_forecast_xG$mean)/abs(Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(Sales_forecast_xG)
+```
+
+#Making Time Series Model for Female Category
+Decomposing Product Category WomenClothing for visualizing random, seasonal and trend components of TimeSeries
+```{r , echo=FALSE }
+dfFemale_timeseriescomponents <-  decompose(dfFemale_REM$Sales.In.ThousandDollars.)
+plot(dfFemale_timeseriescomponents)
+```
+
+#ACF and PACF plots
+```{r , echo=FALSE }
+par(mfrow=c(1,3))
+plot(dfFemale_REM$Sales.In.ThousandDollars.)
+acf(dfFemale_REM$Sales.In.ThousandDollars.)
+pacf(dfFemale_REM$Sales.In.ThousandDollars., lag.max=20)
+par(mfrow=c(1,1))
+```
+
+#Split into train and test
+```{r}
+FE_Sales_train = subset(dfFemale_REM, Year !="2015")
+FE_Sales_test = subset(dfFemale_REM, Year =="2015")
+
+FE_Sales_traints = ts(FE_Sales_train$Sales.In.ThousandDollars., frequency = 12,start=c(2009,1))
+FE_Sales_testts = ts(FE_Sales_test$Sales.In.ThousandDollars., frequency = 12, start = c(2015,1))
+```
+
+#Model Building
+
+##1) Holt Winters model
+```{r}
+FE_Sales_HW <-  HoltWinters(FE_Sales_traints)
+
+#Train Model MAPE
+FE_MAPE_train_HW <- mean(abs(FE_Sales_traints-FE_Sales_HW$fitted[,"xhat"])/abs(FE_Sales_traints))*100
+
+#Validation Forecast Mape
+FE_Sales_forecast_HW <- forecast:::forecast.HoltWinters(FE_Sales_HW, h=12)
+FE_MAPE_test_HW <- mean(abs(FE_Sales_testts - FE_Sales_forecast_HW$mean)/abs(FE_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(FE_Sales_forecast_HW)
+```
+
+##2) Auto.Arima model
+```{r}
+FE_Sales_autoArima = auto.arima(FE_Sales_traints, ic='aic')
+
+#Train Model MAPE
+FE_MAPE_train_AA <- mean(abs(FE_Sales_traints-FE_Sales_autoArima$x)/abs(FE_Sales_traints))*100
+
+#Validation Forecast Mape
+FE_Sales_forecast_AA <- forecast:::forecast.Arima(FE_Sales_autoArima,h=12)
+FE_MAPE_test_AA <- mean(abs(FE_Sales_testts-FE_Sales_forecast_AA$mean)/abs(FE_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(FE_Sales_forecast_AA)
+```
+
+##3) ETS model
+```{r}
+FE_Sales_ETS <- ets(model = "ZMZ",FE_Sales_traints)
+
+#Train Model MAPE
+FE_MAPE_train_ETS <- mean(abs(FE_Sales_traints-FE_Sales_ETS$fitted)/abs(FE_Sales_traints))*100
+
+#Validation Forecast Mape
+FE_Sales_forecast_ETS <- forecast:::forecast.ets(FE_Sales_ETS,h=12)
+FE_MAPE_test_ETS <- mean(abs(FE_Sales_testts-FE_Sales_forecast_ETS$mean)/abs(FE_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(FE_Sales_forecast_ETS)
+```
+
+##4) thetaf model
+```{r}
+FE_Sales_taf <- thetaf(FE_Sales_traints)
+
+#Train Model MAPE
+FE_MAPE_train_taf <- mean(abs(FE_Sales_traints-FE_Sales_taf$fitted)/abs(FE_Sales_traints))*100
+
+#Validation Forecast Mape
+FE_Sales_forecast_taf <- forecast:::forecast.Arima(FE_Sales_autoArima,h=12)
+FE_MAPE_test_taf <- mean(abs(FE_Sales_testts-FE_Sales_forecast_taf$mean)/abs(FE_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(FE_Sales_forecast_taf)
+```
+
+##5) xGBoost model
+```{r}
+FE_Sales_xg <- forecastxgb:::xgbts(FE_Sales_traints)
+
+#Train Model MAPE
+FE_MAPE_train_xG <- mean(abs(FE_Sales_traints-FE_Sales_xg$y)/abs(FE_Sales_traints))*100
+
+#Validation Forecast Mape
+FE_Sales_forecast_xG <- forecast:::forecast(FE_Sales_xg,h=12)
+FE_MAPE_test_xG <- mean(abs(FE_Sales_testts-FE_Sales_forecast_xG$mean)/abs(FE_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(Sales_forecast_xG)
+```
+
+#Making Time Series Model for Other Category
+Decomposing Product Category Other Clothing for visualizing random, seasonal and trend components of TimeSeries
+```{r , echo=FALSE }
+dfOthers_timeseriescomponents <-  decompose(dfOthers_REM$Sales.In.ThousandDollars.)
+plot(dfOthers_timeseriescomponents)
+```
+
+#ACF and PACF plots
+```{r , echo=FALSE }
+par(mfrow=c(1,3))
+plot(dfOthers_REM$Sales.In.ThousandDollars.)
+acf(dfOthers_REM$Sales.In.ThousandDollars.)
+pacf(dfOthers_REM$Sales.In.ThousandDollars., lag.max=20)
+par(mfrow=c(1,1))
+```
+
+#Split into train and test
+```{r}
+OT_Sales_train = subset(dfOthers_REM, Year !="2015")
+OT_Sales_test = subset(dfOthers_REM, Year =="2015")
+
+OT_Sales_traints = ts(OT_Sales_train$Sales.In.ThousandDollars., frequency = 12,start=c(2009,1))
+OT_Sales_testts = ts(OT_Sales_test$Sales.In.ThousandDollars., frequency = 12, start = c(2015,1))
+```
+
+#Model Building
+
+##1) Holt Winters model
+```{r}
+OT_Sales_HW <-  HoltWinters(OT_Sales_traints)
+
+#Train Model MAPE
+OT_MAPE_train_HW <- mean(abs(OT_Sales_traints-OT_Sales_HW$fitted[,"xhat"])/abs(OT_Sales_traints))*100
+
+#Validation Forecast Mape
+OT_Sales_forecast_HW <- forecast:::forecast.HoltWinters(OT_Sales_HW, h=12)
+OT_MAPE_test_HW <- mean(abs(OT_Sales_testts - OT_Sales_forecast_HW$mean)/abs(OT_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(OT_Sales_forecast_HW)
+```
+
+##2) Auto.Arima model
+```{r}
+OT_Sales_autoArima <- auto.arima(OT_Sales_traints, ic='aic')
+
+#Train Model MAPE
+OT_MAPE_train_AA <- mean(abs(OT_Sales_traints-OT_Sales_autoArima$x)/abs(OT_Sales_traints))*100
+
+#Validation Forecast Mape
+OT_Sales_forecast_AA <- forecast:::forecast.Arima(OT_Sales_autoArima,h=12)
+OT_MAPE_test_AA <- mean(abs(OT_Sales_testts-OT_Sales_forecast_AA$mean)/abs(OT_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(OT_Sales_forecast_AA)
+```
+
+##3) ETS model
+```{r}
+OT_Sales_ETS <- ets(model = "ZMZ",OT_Sales_traints)
+
+#Train Model MAPE
+OT_MAPE_train_ETS <- mean(abs(OT_Sales_traints-OT_Sales_ETS$fitted)/abs(OT_Sales_traints))*100
+
+#Validation Forecast Mape
+OT_Sales_forecast_ETS <- forecast:::forecast.ets(OT_Sales_ETS,h=12)
+OT_MAPE_test_ETS <- mean(abs(OT_Sales_testts-OT_Sales_forecast_ETS$mean)/abs(OT_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(OT_Sales_forecast_ETS)
+```
+
+##4) thetaf model
+```{r}
+OT_Sales_taf <- thetaf(OT_Sales_traints)
+
+#Train Model MAPE
+OT_MAPE_train_taf <- mean(abs(OT_Sales_traints-OT_Sales_taf$fitted)/abs(OT_Sales_traints))*100
+
+#Validation Forecast Mape
+OT_Sales_forecast_taf <- forecast:::forecast.Arima(OT_Sales_autoArima,h=12)
+OT_MAPE_test_taf <- mean(abs(OT_Sales_testts-OT_Sales_forecast_taf$mean)/abs(OT_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(OT_Sales_forecast_taf)
+```
+
+##5) xGBoost model
+```{r}
+OT_Sales_xg <- forecastxgb:::xgbts(OT_Sales_traints)
+
+#Train Model MAPE
+OT_MAPE_train_xG <- mean(abs(OT_Sales_traints-Sales_xg$y)/abs(OT_Sales_traints))*100
+
+#Validation Forecast Mape
+OT_Sales_forecast_xG <- forecast:::forecast(OT_Sales_xg,h=12)
+OT_MAPE_test_xG <- mean(abs(OT_Sales_testts-OT_Sales_forecast_xG$mean)/abs(OT_Sales_testts))*100
+```
+###Visualizing Forecasted Values
+```{r , echo=FALSE }
+autoplot(OT_Sales_forecast_xG)
+```
+
+#Model Evaluation DataFrameProcessing
+```{r }
+men <-list(c(MAPE_train_HW,MAPE_test_HW),
+            c( MAPE_train_AA,MAPE_test_AA),
+            c( MAPE_train_ETS,MAPE_test_ETS),
+            c( MAPE_train_taf,MAPE_test_taf),
+             c(MAPE_train_xG,MAPE_test_xG))
+women <-list(c(FE_MAPE_train_HW,FE_MAPE_test_HW),
+            c( FE_MAPE_train_AA,FE_MAPE_test_AA),
+            c( FE_MAPE_train_ETS,FE_MAPE_test_ETS),
+            c( FE_MAPE_train_taf,FE_MAPE_test_taf),
+             c(FE_MAPE_train_xG,FE_MAPE_test_xG))
+other <-list(c(OT_MAPE_train_HW,OT_MAPE_test_HW),
+            c( OT_MAPE_train_AA,OT_MAPE_test_AA),
+            c( OT_MAPE_train_ETS,OT_MAPE_test_ETS),
+            c( OT_MAPE_train_taf,OT_MAPE_test_taf),
+             c(OT_MAPE_train_xG,OT_MAPE_test_xG))
+df<- as.data.frame(c(men,women,other))
+#write.csv(df,"exp.csv")
+df<-read.csv("exp.csv")
+```
+
+#Model Evaluation
+
+```{r }
+df
+```
+
+#Observation
+
+Clearly xgBoost overfits the Training Data for both Men and Women but intrestingly models goes off for Others category. Going by validation result best model for</br>
+a)Men -> HoltWinter </br>
+b)Women -> ETS </br>
+c)Others -> AutoArima </br>
+
+#Point To Ponder:
+##Whereas Ensemble of these 3 individual models gives poor result in Grader as compared to xGboost.
